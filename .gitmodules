@@ -1,0 +1,3 @@
+[submodule "text-to-image/text-to-image/TensorRT"]
+	path = text-to-image/text-to-image/TensorRT
+	url = https://github.com/NVIDIA/TensorRT
