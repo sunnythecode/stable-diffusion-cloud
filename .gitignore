@@ -1,0 +1,12 @@
+*.png
+*.pyc
+*.csv
+
+.vscode
+/generated
+/coco_data
+/coco_gen_images
+/coco_val_images
+/coco_gen_images_12345
+/tmp
+/fid

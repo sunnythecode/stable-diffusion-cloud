@@ -174,7 +174,7 @@ def profile_stable_diffusion(config):
     
     # Load the model
     print("Loading Stable Diffusion 2.1...")
-    model_id = "Manojb/stable-diffusion-2-1-base"
+    model_id = "sd2-community/stable-diffusion-2-1"
     
     dtype = torch.float16 if config.use_fp16 else torch.float32
     
