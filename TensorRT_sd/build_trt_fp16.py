@@ -1,6 +1,6 @@
 # build_trt_fp16.py
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+# os.environ["CUDA_VISIBLE_DEVICES"] = "1"
 import tensorrt as trt
 
 
