@@ -44,7 +44,7 @@ def calculate_fid_cleanfid(real_images_path, generated_images_path,
 
 if __name__ == "__main__":
     REAL_IMAGES = "/home/sandeep_b/qualcomm_sd/coco_val_images"
-    GENERATED_IMAGES = "/home/sandeep_b/qualcomm_sd/coco_gen_images_12345"
+    GENERATED_IMAGES = "/home/sandeep_b/qualcomm_sd/t/coco_gen_images_12345"
     
     try:
         fid_score = calculate_fid_cleanfid(

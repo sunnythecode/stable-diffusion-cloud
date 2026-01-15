@@ -1,5 +1,5 @@
 import os
-os.environ["CUDA_VISIBLE_DEVICES"] = "7"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 import torch
 import time
 from dataclasses import dataclass
@@ -30,8 +30,6 @@ class PromptConfig:
     
     # Core settings
     prompt: str
-    negative_prompt: str = ""
-    use_negative_prompt: bool = True
     
     # Generation parameters
     num_inference_steps: int = 50
@@ -47,7 +45,7 @@ class PromptConfig:
     scheduler_name: str = "default"
     
     # TensorRT settings
-    use_tensorrt: bool = False
+    use_tensorrt: bool = True
     tensorrt_engine_dir: str = "./tensorrt_engines"
     tensorrt_build_on_first_run: bool = True
     
@@ -67,10 +65,8 @@ class PromptConfig:
     
     def __str__(self):
         """Pretty print configuration."""
-        negative_status = "Disabled" if not self.use_negative_prompt else f'"{self.negative_prompt[:50]}{"..." if len(self.negative_prompt) > 50 else ""}"'
         return f"""PromptConfig:
   Prompt: "{self.prompt[:60]}{'...' if len(self.prompt) > 60 else ''}"
-  Negative: {negative_status}
   Resolution: {self.width}x{self.height}
   Steps: {self.num_inference_steps}
   Guidance Scale: {self.guidance_scale}
@@ -217,7 +213,6 @@ def profile_stable_diffusion(config):
     print(f"  Seed: {config.seed}")
     print(f"  Precision: {'fp16' if config.use_fp16 else 'fp32'}")
     print(f"  TensorRT: {'Enabled' if config.use_tensorrt else 'Disabled'}")
-    print(f"  Negative Prompt: {'Enabled - ' + config.negative_prompt if config.use_negative_prompt and config.negative_prompt else 'Disabled'}")
     
     # Model statistics
     print("\n" + "="*60)
@@ -255,32 +250,7 @@ def profile_stable_diffusion(config):
     timings['text_encode_prompt'] = time.perf_counter() - text_encode_start
     print(f"Text Encoder (encode prompt): {timings['text_encode_prompt']:.4f} seconds")
     
-    # Encode unconditional (negative prompt) - only if enabled
-    if config.use_negative_prompt:
-        torch.cuda.synchronize()
-        neg_encode_start = time.perf_counter()
-        
-        uncond_input = pipe.tokenizer(
-            config.negative_prompt if config.negative_prompt else "",
-            padding="max_length",
-            max_length=pipe.tokenizer.model_max_length,
-            return_tensors="pt",
-        )
-        uncond_input_ids = uncond_input.input_ids.to("cuda")
-        
-        with torch.no_grad():
-            uncond_embeddings = pipe.text_encoder(uncond_input_ids)[0]
-        
-        torch.cuda.synchronize()
-        timings['text_encode_negative'] = time.perf_counter() - neg_encode_start
-        print(f"Text Encoder (encode negative prompt): {timings['text_encode_negative']:.4f} seconds")
-        
-        text_embeddings = torch.cat([uncond_embeddings, text_embeddings])
-        timings['text_encoding_total'] = timings['text_encode_prompt'] + timings['text_encode_negative']
-    else:
-        print("Negative prompt disabled - skipping unconditional encoding")
-        timings['text_encode_negative'] = 0.0
-        timings['text_encoding_total'] = timings['text_encode_prompt']
+    timings['text_encoding_total'] = timings['text_encode_prompt']
     
     # 2. UNET (Denoising)
     print("\n" + "="*60)
@@ -301,8 +271,7 @@ def profile_stable_diffusion(config):
     if config.use_tensorrt:
         print("Warming up TensorRT (compiling on first run)...")
         with torch.no_grad():
-            latent_model_input = torch.cat([latents] * 2) if config.use_negative_prompt else latents
-            latent_model_input = pipe.scheduler.scale_model_input(latent_model_input, pipe.scheduler.timesteps[0])
+            latent_model_input = pipe.scheduler.scale_model_input(latents, pipe.scheduler.timesteps[0])
             _ = pipe.unet(
                 latent_model_input,
                 pipe.scheduler.timesteps[0],
@@ -317,12 +286,7 @@ def profile_stable_diffusion(config):
         torch.cuda.synchronize()
         step_start = time.perf_counter()
         
-        if config.use_negative_prompt:
-            latent_model_input = torch.cat([latents] * 2)
-        else:
-            latent_model_input = latents
-        
-        latent_model_input = pipe.scheduler.scale_model_input(latent_model_input, t)
+        latent_model_input = pipe.scheduler.scale_model_input(latents, t)
         
         with torch.no_grad():
             noise_pred = pipe.unet(
@@ -330,10 +294,6 @@ def profile_stable_diffusion(config):
                 t,
                 encoder_hidden_states=text_embeddings,
             ).sample
-        
-        if config.use_negative_prompt:
-            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
-            noise_pred = noise_pred_uncond + config.guidance_scale * (noise_pred_text - noise_pred_uncond)
         
         latents = pipe.scheduler.step(noise_pred, t, latents).prev_sample
         
@@ -390,7 +350,6 @@ def profile_stable_diffusion(config):
     print("="*60)
     print(f"Scheduler: {type(pipe.scheduler).__name__}")
     print(f"TensorRT: {'Enabled' if config.use_tensorrt else 'Disabled'}")
-    print(f"Negative Prompt: {'Enabled' if config.use_negative_prompt else 'Disabled'}")
     print(f"Model Load: {timings['model_load']:.4f} seconds")
     print(f"Text Encoding total: {timings['text_encoding_total']:.4f} seconds")
     print(f"UNet total: {timings['unet_total']:.4f} seconds ({config.num_inference_steps} steps)")
@@ -417,36 +376,12 @@ def test_n_stable_diffusion(config, n):
 
 
 if __name__ == "__main__":
-    # Example: Compare with and without TensorRT
-    # print("\n" + "="*70)
-    # print("TESTING WITHOUT TENSORRT")
-    # print("="*70)
-    
-    # config_baseline = PromptConfig(
-    #     prompt="a serene mountain landscape at sunset, highly detailed, 4k",
-    #     negative_prompt="blurry, low quality, distorted, ugly",
-    #     use_negative_prompt=False,
-    #     num_inference_steps=50,
-    #     height=768,
-    #     width=768,
-    #     guidance_scale=7.5,
-    #     seed=12345,
-    #     scheduler_name="dpm",
-    #     use_fp16=True,
-    #     use_tensorrt=False,
-    #     output_filename="mountain_sunset_baseline.png"
-    # )
-    
-    # img_baseline, tr_baseline = test_n_stable_diffusion(config_baseline, 3)
-    
     print("\n" + "="*70)
     print("TESTING WITH TENSORRT")
     print("="*70)
     
     config_tensorrt = PromptConfig(
         prompt="Neon cyberpunk street market at night",
-        negative_prompt="blurry, low quality, distorted, ugly",
-        use_negative_prompt=False,
         num_inference_steps=50,
         height=768,
         width=768,
@@ -460,16 +395,8 @@ if __name__ == "__main__":
     
     img_tensorrt, tr_tensorrt = test_n_stable_diffusion(config_tensorrt, 1)
     
-    # Compare results
     print("\n" + "="*70)
     print("PERFORMANCE COMPARISON")
     print("="*70)
-    
-    # avg_baseline = sum(t['total_generation'] for t in tr_baseline) / len(tr_baseline)
-    # avg_tensorrt = sum(t['total_generation'] for t in tr_tensorrt) / len(tr_tensorrt)
-    
-    # print(f"Average generation time (baseline): {avg_baseline:.4f} seconds")
-    # print(f"Average generation time (TensorRT): {avg_tensorrt:.4f} seconds")
-    # print(f"Speedup: {avg_baseline/avg_tensorrt:.2f}x")
     
     print("\nImage generation complete!")

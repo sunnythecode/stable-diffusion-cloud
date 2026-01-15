@@ -10,3 +10,8 @@
 /coco_gen_images_12345
 /tmp
 /fid
+/TensorRT-10.14.1.48
+/TensorRT
+/trial1_onnx
+*.trt
+/TensorRT_sd/*.onnx
